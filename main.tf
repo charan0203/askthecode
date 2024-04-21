@@ -94,9 +94,9 @@ module "service_project1_for_spoke1" {
     service_identity_iam = {
       
     }
-    # iam = {
-    #    "roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"]
-    # }
+    iam = {
+      "roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"]
+   }
   }
 }
 
