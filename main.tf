@@ -5,15 +5,15 @@
 # Hub Project with Standard VPC
 module "hub_project" {
   source            = "../../../modules/project"
-  prefix = var.prefix
+  prefix            = var.prefix
   name              = "hub-project"
-  parent = data.google_folder.my_folder_info.folder
+  parent            = data.google_folder.my_folder_info.folder
   billing_account   = var.billing_account_id
-  services        = concat(var.project_services, ["dns.googleapis.com", "container.googleapis.com"])
-   iam_roles = {
-    "roles/container.serviceAgent" = ["serviceAccount:service-${module.hub_project.project_number}@container-engine-robot.iam.gserviceaccount.com"]
-  }
+  services          = concat(var.project_services, ["dns.googleapis.com"])
+
+  
 }
+
 
 module "hub_vpc" {
   source      = "../../../modules/net-vpc"
@@ -38,15 +38,30 @@ module "spoke1_project" {
   name                = "spoke1-project"
   parent = data.google_folder.my_folder_info.folder
   billing_account     = var.billing_account_id
-  services        = concat(var.project_services, ["dns.googleapis.com"])
+  services        = concat(var.project_services, ["dns.googleapis.com","container.googleapis.com"])
   shared_vpc_host_config = {
     enabled = true
   }
   iam = {
-    "roles/owner" = var.owners_host
-   "roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"]
-    #"roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@cloudservices.gserviceaccount.com"]
-  }
+  "roles/owner"                    = var.owners_host
+  "roles/container.hostServiceAgentUser" = [
+    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com",
+    "serviceAccount:service-${module.spoke1_project.number}@cloudservices.gserviceaccount.com",
+    "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com",
+    "serviceAccount:service-${module.spoke1_project.number}@developer.gserviceaccount.com"
+  ]
+  "roles/container.serviceAgent"   = [
+    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com",
+    "serviceAccount:service-${module.spoke1_project.number}@cloudservices.gserviceaccount.com"
+  ]
+  "roles/compute.networkUser"     = [
+    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"
+  ]
+  "roles/compute.instanceAdmin"   = [
+    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"
+  ]
+}
+
   
 }
 
@@ -72,13 +87,16 @@ module "service_project1_for_spoke1" {
   name                = "service-project1-spoke1"
   parent = data.google_folder.my_folder_info.folder
   billing_account     = var.billing_account_id
-  services        = concat(var.project_services, ["dns.googleapis.com"])
+  services        = concat(var.project_services, ["dns.googleapis.com", "container.googleapis.com"])
   // Shared VPC host project ID
   shared_vpc_service_config = {
     host_project = module.spoke1_project.project_id
     service_identity_iam = {
       
     }
+    # iam = {
+    #    "roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"]
+    # }
   }
 }
 
@@ -149,6 +167,7 @@ module "spoke1-shared-vpc" {
       iam = {
         "roles/compute.networkUser" = concat(var.owners_gce, [
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.cloud_services}",
+
         ])
       }
     },
@@ -164,10 +183,13 @@ module "spoke1-shared-vpc" {
         "roles/compute.networkUser" = concat(var.owners_gke, [
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.cloud_services}",
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.robots.container-engine}",
-        ])
+          "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"
+        ]),
         "roles/compute.securityAdmin" = [
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.robots.container-engine}",
-        ]
+        ],
+        "roles/compute.networkUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"],
+        "roles/compute.networkUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@compute-system.iam.gserviceaccount.com"],
       }
     }
   ]

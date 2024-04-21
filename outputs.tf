@@ -16,3 +16,10 @@ output "project_id" {
 output "project_number" {
   value = module.service_project1_for_spoke1
 }
+
+output "gke_serviceAccount_service_project1_for_spoke1" {
+  value= "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"
+}
+output "gke_serviceAccount_spoke1_project" {
+  value= "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"
+}
