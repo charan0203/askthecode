@@ -39,28 +39,35 @@ module "spoke1_project" {
   parent = data.google_folder.my_folder_info.folder
   billing_account     = var.billing_account_id
   services        = concat(var.project_services, ["dns.googleapis.com","container.googleapis.com"])
+  
   shared_vpc_host_config = {
     enabled = true
+   
   }
   iam = {
-  "roles/owner"                    = var.owners_host
-  "roles/container.hostServiceAgentUser" = [
-    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com",
-    "serviceAccount:service-${module.spoke1_project.number}@cloudservices.gserviceaccount.com",
-    "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com",
-    "serviceAccount:service-${module.spoke1_project.number}@developer.gserviceaccount.com"
-  ]
-  "roles/container.serviceAgent"   = [
-    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com",
-    "serviceAccount:service-${module.spoke1_project.number}@cloudservices.gserviceaccount.com"
-  ]
-  "roles/compute.networkUser"     = [
-    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"
-  ]
-  "roles/compute.instanceAdmin"   = [
-    "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"
-  ]
-}
+    "roles/owner" = var.owners_host
+  }
+ 
+#   iam = {
+#   "roles/owner"                    = var.owners_host
+#   "roles/container.hostServiceAgentUser" = var.owners_host
+#   "roles/container.hostServiceAgentUser" = [
+#     "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com",
+#     "serviceAccount:${module.spoke1_project.number}@cloudservices.gserviceaccount.com",
+#     "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com",
+#     "serviceAccount:${module.spoke1_project.number}-compute@developer.gserviceaccount.com"
+#   ]
+#   "roles/container.serviceAgent"   = [
+#     "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"
+#   ]
+#   "roles/compute.networkUser"     = [
+#     "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com",
+#     "serviceAccount:service-${module.spoke1_project.number}@cloudservices.gserviceaccount.com"
+#   ]
+#   "roles/compute.instanceAdmin"   = [
+#     "serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"
+#   ]
+# }
 
   
 }
@@ -92,14 +99,17 @@ module "service_project1_for_spoke1" {
   shared_vpc_service_config = {
     host_project = module.spoke1_project.project_id
     service_identity_iam = {
-      
+      "roles/container.hostServiceAgentUser" = ["container-engine"]
+      "roles/compute.networkUser"            = ["container-engine"]
     }
-    iam = {
-      "roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"]
-   }
+  
   }
 }
-
+resource "google_project_iam_member" "service_project1_host_service_agent_user" {
+  project = module.service_project1_for_spoke1.project_id
+  role    = "roles/container.hostServiceAgentUser"
+  member  = "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"
+}
 module "service_project2_for_spoke1" {
   source              = "../../../modules/project"
   prefix = var.prefix
@@ -111,7 +121,8 @@ module "service_project2_for_spoke1" {
   shared_vpc_service_config = {
     host_project = module.spoke1_project.project_id
     service_identity_iam = {
-      
+      "roles/container.hostServiceAgentUser" = ["container-engine"]
+      "roles/compute.networkUser"            = ["container-engine"]
     }
   }
 }
@@ -167,7 +178,7 @@ module "spoke1-shared-vpc" {
       iam = {
         "roles/compute.networkUser" = concat(var.owners_gce, [
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.cloud_services}",
-
+          "serviceAccount:${module.service_project1_for_spoke1.service_accounts.robots.container-engine}"
         ])
       }
     },
@@ -181,15 +192,20 @@ module "spoke1-shared-vpc" {
       }
       iam = {
         "roles/compute.networkUser" = concat(var.owners_gke, [
+          "serviceAccount:${module.spoke1_project.number}@cloudservices.gserviceaccount.com",
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.cloud_services}",
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.robots.container-engine}",
-          "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"
+          "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com",
+          "serviceAccount:${module.service_project1_for_spoke1.number}@cloudservices.gserviceaccount.com",
+          "serviceAccount:service-${module.service_project1_for_spoke1.number}@compute-system.iam.gserviceaccount.com"
         ]),
+        "roles/compute.networkViewer" = var.owners_host
         "roles/compute.securityAdmin" = [
           "serviceAccount:${module.service_project1_for_spoke1.service_accounts.robots.container-engine}",
         ],
-        "roles/compute.networkUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"],
-        "roles/compute.networkUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@compute-system.iam.gserviceaccount.com"],
+        "roles/compute.networkUser" = [
+          "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com",
+          "serviceAccount:${module.service_project1_for_spoke1.number}@cloudservices.gserviceaccount.com"]
       }
     }
   ]
@@ -442,45 +458,75 @@ module "spoke1_private_dns" {
 # }
 
 module "spoke1_cloud_nat" {
-  source      = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/net-cloudnat"
-  project_id  = module.spoke1_project.project_id
-  region      = var.region
-  name        = "spoke1-cloud-nat"
-  
-  // The 'router_network' variable should be the name of the VPC, not the network self link.
-  router_network = module.spoke1-shared-vpc.name
+  source           = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/net-cloudnat"
+  project_id       = module.spoke1_project.project_id
+  region           = var.region
+  name             = "spoke1-cloud-nat"
+  router_network   = module.spoke1-shared-vpc.name
+  router_create    = true  // Indicates that the module should create the router
 
-  // If you are creating a new router for this NAT, set 'router_create' to true.
-  // If you're using an existing router, set 'router_create' to false and provide 'router_name'.
-  router_create = false
-  router_name   = "spoke1-nw"  // The name of the existing router.
 
-  // Define external IP addresses if you have any. Otherwise, this will default to an empty list.
-  addresses = []
-
-  // 'config_source_subnetworks' defines the subnetworks for NAT.
-  // 'all' being true means all subnetworks in the region are NAT-ed.
+  // Define subnetworks to enable NAT on them.
+  // The 'all' variable set to true means all subnetworks in the region are NAT-ed.
   config_source_subnetworks = {
     all = true
   }
 
+  // Optionally set a filter for the NAT logging.
   // If you want to enable logging, set 'logging_filter' to one of the allowed values.
   // Leave it as null if you do not want to enable logging.
   logging_filter = null
+
+  
 }
+
+# module "spoke1_cloud_nat" {
+#   source      = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/net-cloudnat"
+#   project_id  = module.spoke1_project.project_id
+#   region      = var.region
+#   name        = "spoke1-cloud-nat"
+  
+#   // The 'router_network' variable should be the name of the VPC, not the network self link.
+#   router_network = module.spoke1-shared-vpc.name
+
+#   // If you are creating a new router for this NAT, set 'router_create' to true.
+#   // If you're using an existing router, set 'router_create' to false and provide 'router_name'.
+#   router_create = false
+#   router_name   = "spoke1-nw"  // The name of the existing router.
+
+#   // Define external IP addresses if you have any. Otherwise, this will default to an empty list.
+#   addresses = []
+
+#   // 'config_source_subnetworks' defines the subnetworks for NAT.
+#   // 'all' being true means all subnetworks in the region are NAT-ed.
+#   config_source_subnetworks = {
+#     all = true
+#   }
+
+#   // If you want to enable logging, set 'logging_filter' to one of the allowed values.
+#   // Leave it as null if you do not want to enable logging.
+#   logging_filter = null
+# }
 
 ##############################GKE Configuration####################################
 module "cluster-1" {
   source     = "../../../modules/gke-cluster-standard"
   count      = var.cluster_create ? 1 : 0
   name       = "cluster-1"
-  project_id = module.service_project2_for_spoke1.project_id
+  project_id = module.service_project1_for_spoke1.project_id
   location   = "${var.region}-b"
   vpc_config = {
-   network    = module.spoke1-shared-vpc.self_link
+    network    = module.spoke1-shared-vpc.self_link
     subnetwork = module.spoke1-shared-vpc.subnet_self_links["${var.region}/gke"]
-     master_ipv4_cidr_block = "172.16.0.16/28"
+    master_ipv4_cidr_block = var.private_service_ranges.cluster-1
+    secondary_range_names = {
+      #pods     = var.secondary_range_names["pods"]
+      #services = var.secondary_range_names["services"]
+    }
 
+    master_authorized_ranges = {
+      "CorpNet" = "192.168.100.0/24"  # Adjust this CIDR block as necessary for your network
+    }
   }
   max_pods_per_node = 32
   private_cluster_config = {
@@ -493,11 +539,13 @@ module "cluster-1" {
   deletion_protection = var.deletion_protection
 }
 
+
+
 module "cluster-1-nodepool-1" {
   source       = "../../../modules/gke-nodepool"
   count        = var.cluster_create ? 1 : 0
   name         = "nodepool-1"
-  project_id   = module.service_project2_for_spoke1.project_id
+  project_id   = module.service_project1_for_spoke1.project_id
   location     = module.cluster-1.0.location
   cluster_name = module.cluster-1.0.name
   cluster_id   = module.cluster-1.0.id
@@ -505,4 +553,40 @@ module "cluster-1-nodepool-1" {
     create = true
   }
 }
+
+###### Hub-VM #####
+module "hub_vm" {
+  source     = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/compute-vm"
+  project_id = module.hub_project.project_id
+  zone       = "europe-west3-c"
+
+  name         = "hub-vm"
+  instance_type = "e2-medium"
+  
+  boot_disk = {
+    initialize_params = {
+      image = "projects/debian-cloud/global/images/family/debian-10"
+    }
+  }
+
+  network_interfaces = [{
+    network    = module.hub_vpc.self_link
+    subnetwork = module.hub_vpc.subnets["europe-west3/hub-subnet"].self_link  # Adjust the key to match the subnet name
+    access_config = {}
+  }]
+
+  service_account = {
+    email  = "default"
+    scopes = ["cloud-platform"]
+  }
+
+  metadata = {
+    enable-oslogin = "TRUE"
+  }
+
+  tags = ["hub-vm", "test-environment"]
+}
+
+
+
 
