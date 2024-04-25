@@ -11,6 +11,17 @@ module "hub_project" {
   billing_account   = var.billing_account_id
   services          = concat(var.project_services, ["dns.googleapis.com"])
 
+iam = {
+    "roles/container.clusterViewer" = [
+      "serviceAccount:${module.hub_project.number}-compute@developer.gserviceaccount.com"
+    ]
+    "roles/container.hostServiceAgentUser" = [
+      "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"
+    ]
+     "roles/container.admin" = [
+      "serviceAccount:${module.hub_project.number}-compute@developer.gserviceaccount.com"
+    ]
+  }
   
 }
 
@@ -102,14 +113,18 @@ module "service_project1_for_spoke1" {
       "roles/container.hostServiceAgentUser" = ["container-engine"]
       "roles/compute.networkUser"            = ["container-engine"]
     }
-  
   }
+iam = {
+    "roles/container.clusterViewer" = [
+      "serviceAccount:${module.hub_project.number}-compute@developer.gserviceaccount.com"
+    ]
 }
-resource "google_project_iam_member" "service_project1_host_service_agent_user" {
-  project = module.service_project1_for_spoke1.project_id
-  role    = "roles/container.hostServiceAgentUser"
-  member  = "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"
 }
+# resource "google_project_iam_member" "service_project1_host_service_agent_user" {
+#   project = module.service_project1_for_spoke1.project_id
+#   role    = "roles/container.hostServiceAgentUser"
+#   member  = "serviceAccount:service-${module.service_project1_for_spoke1.number}@container-engine-robot.iam.gserviceaccount.com"
+# }
 module "service_project2_for_spoke1" {
   source              = "../../../modules/project"
   prefix = var.prefix
@@ -272,7 +287,7 @@ module "hub_firewall_rules" {
     },
     "deny-all-ingress-to-hub" = {
       description        = "Deny all ingress to hub"
-      priority           = 1000
+      priority           = 1100
       source_ranges      = ["0.0.0.0/0"]
       rules = [
         {
@@ -299,8 +314,8 @@ module "spoke1_firewall_rules" {
   egress_rules = {
     "allow-traffic-to-hub" = {
       description        = "Allow traffic to hub network"
-      priority           = 1000
-      destination_ranges = ["10.0.0.0/24"] # Replace with the IP range of the hub network
+      priority           = 900  # Higher priority (lower number)
+      destination_ranges = ["10.0.0.0/24"]  # Replace with the IP range of the hub network
       rules = [
         {
           protocol = "tcp"
@@ -317,8 +332,8 @@ module "spoke1_firewall_rules" {
     },
     "block-direct-traffic-between-spokes-egress" = {
       description        = "Block direct egress traffic between spokes"
-      priority           = 1000
-      destination_ranges = ["10.20.0.0/24"] # Correct the IP range if necessary
+      priority           = 950  # Slightly lower priority than the allow rule
+      destination_ranges = ["10.20.0.0/24"]  # Correct the IP range if necessary
       deny               = true
       rules = [
         {
@@ -337,8 +352,8 @@ module "spoke1_firewall_rules" {
   ingress_rules = {
     "block-direct-traffic-between-spokes-ingress" = {
       description   = "Block direct ingress traffic between spokes"
-      priority      = 1000
-      source_ranges = ["10.20.0.0/24"] # Correct the IP range if necessary
+      priority      = 970  # Lower priority than the specific allows but higher than general deny
+      source_ranges = ["10.20.0.0/24"]  # Correct the IP range if necessary
       deny          = true
       rules = [
         {
@@ -354,7 +369,7 @@ module "spoke1_firewall_rules" {
     },
     "deny-all-other-ingress-spoke" = {
       description   = "Deny all other ingress to the spoke"
-      priority      = 1000
+      priority      = 990  # Lowest priority for broad deny rules
       source_ranges = ["0.0.0.0/0"]
       deny          = true
       rules = [
@@ -362,9 +377,20 @@ module "spoke1_firewall_rules" {
           protocol = "all"
         }
       ]
+    },
+    "allow-icmp-from-hub" = {
+      description   = "Allow ICMP from Hub VPC"
+      priority      = 960   # Higher priority to ensure it is processed before most denies
+      source_ranges = ["10.0.0.0/24"]  # IP range of the hub network
+      rules = [
+        {
+          protocol = "icmp"
+        }
+      ]
     }
   }
 }
+
 
 
 # module "spoke2_firewall_rules" {
@@ -525,7 +551,7 @@ module "cluster-1" {
     }
 
     master_authorized_ranges = {
-      "CorpNet" = "192.168.100.0/24"  # Adjust this CIDR block as necessary for your network
+      "CorpNet" = "10.0.0.0/24"  # Adjust this CIDR block as necessary for your network
     }
   }
   max_pods_per_node = 32
@@ -586,6 +612,7 @@ module "hub_vm" {
 
   tags = ["hub-vm", "test-environment"]
 }
+
 
 
 
