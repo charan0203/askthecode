@@ -1,53 +1,32 @@
-
-
-# variable "project_id" {
-#   description = "The Google Cloud project ID"
-#   type        = string
-# }
-
-
+variable "spoke_number" {
+  description = "The number of the spoke."
+  type        = string
+}
 
 # variable "parent_folder_id" {
-#   description = "The parent folder ID in Google Cloud"
+#   description = "The ID of the parent folder."
 #   type        = string
 # }
 
-variable "org_id" {
-  description = "The organization ID in Google Cloud"
+
+variable "spoke_name" {
+  description = "The name of the spoke."
+  type        = string
+}
+
+variable "prefix" {
+  description = "The prefix for naming resources."
   type        = string
 }
 
 variable "billing_account_id" {
-  description = "The billing account ID in Google Cloud"
+  description = "The billing account ID."
   type        = string
 }
 
-variable "owners_host" {
-  description = "List of owners for the project"
-  type        = list(string)
-}
-
-
-variable "spoke1_network_name" {
-  description = "The network name for Spoke 1"
+variable "region" {
+  description = "The region where resources are deployed."
   type        = string
-}
-
-# variable "spoke2_network_name" {
-#   description = "The network name for Spoke 2"
-#   type        = string
-# }
-
-
-
-
-variable "ip_ranges" {
-  description = "Subnet IP CIDR ranges."
-  type        = map(string)
-  default = {
-    gce = "10.0.16.0/24"
-    gke = "10.0.32.0/24"
-  }
 }
 
 variable "ip_secondary_ranges" {
@@ -59,23 +38,26 @@ variable "ip_secondary_ranges" {
   }
 }
 
+
+
 variable "owners_gce" {
-  description = "GCE project owners, in IAM format."
+  description = "List of GCE owners."
   type        = list(string)
-  default     = []
+}
+
+variable "owners_host" {
+  description = "List of host owners."
+  type        = list(string)
 }
 
 variable "owners_gke" {
-  description = "GKE project owners, in IAM format."
+  description = "List of GKE owners."
   type        = list(string)
-  default     = []
 }
 
-
-variable "region" {
-  description = "Region used."
-  type        = string
-  default     = "europe-west3"
+variable "cluster_create" {
+  description = "Flag to determine if the GKE cluster should be created."
+  type        = bool
 }
 
 variable "project_services" {
@@ -87,23 +69,6 @@ variable "project_services" {
   ]
 }
 
-
-variable "root_node" {
-  description = "Hierarchy node where projects will be created, 'organizations/org_id' or 'folders/folder_id'."
-  type        = string
-}
-
-variable "folder_display_name" {
-  type        = string
-  description = "The display name of the folder."
-}
-
-variable "cluster_create" {
-  description = "Create GKE cluster and nodepool."
-  type        = bool
-  default     = false
-}
-
 variable "deletion_protection" {
   description = "Prevent Terraform from destroying data storage resources (storage buckets, GKE clusters, CloudSQL instances) in this blueprint. When this field is set in Terraform state, a terraform destroy or terraform apply that would delete data storage resources will fail."
   type        = bool
@@ -111,8 +76,51 @@ variable "deletion_protection" {
   nullable    = false
 }
 
-variable "prefix" {
-  description = "Prefix used for resource names."
-  type        = string
+variable "ip_ranges" {
+  description = "Subnet IP CIDR ranges."
+  type        = map(string)
+  default = {
+    hub = "10.0.0.0/24"
+    gce = "10.0.16.0/24"
+    gke = "10.0.32.0/24"
+  }
 }
 
+
+variable "private_service_ranges" {
+  description = "Private service IP CIDR ranges."
+  type        = map(string)
+  default = {
+    cluster-1 = "192.168.0.0/28"
+  }
+}
+
+variable "bgp_peer_addresses" {
+  type = map(string)
+  description = "A map of BGP peer addresses for each VPN connection"
+}
+
+variable "bgp_session_ranges" {
+  type = map(string)
+  description = "A map of BGP session ranges for each VPN connection"
+}
+
+# variable "bgp_peer_addresses" {
+#   type = map(string)
+#   default = {
+#     "hub_remote_0" = "169.254.1.1"
+#     "hub_remote_1" = "169.254.2.1"
+#     "spoke_2_remote_0" = "169.254.1.2"
+#     "spoke_2_remote_1" = "169.254.2.2"
+#   }
+# }
+
+# variable "bgp_session_ranges" {
+#   type = map(string)
+#   default = {
+#     "hub_remote_0" = "169.254.1.2/30"
+#     "hub_remote_1" = "169.254.2.2/30"
+#     "spoke_2_remote_0" = "169.254.1.1/30"
+#     "spoke_2_remote_1" = "169.254.2.1/30"
+#   }
+# }
