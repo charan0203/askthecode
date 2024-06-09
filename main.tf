@@ -1,154 +1,89 @@
+terraform {
+  backend "gcs" {}
+} 
 
-# Create a new folder inside the 'nbss-main' folder
+#The above terraform backend block is to get rid of the error when we run terragrunt init, we just have to include it, it doesn't effect the remote state
 
-
-# Hub Project with Standard VPC
-module "hub_project" {
-  source            = "../../../modules/project"
-  prefix = var.prefix
-  name              = "hub-project"
-  parent = data.google_folder.my_folder_info.folder
-  billing_account   = var.billing_account_id
-  services        = concat(var.project_services, ["dns.googleapis.com", "container.googleapis.com"])
-   iam_roles = {
-    "roles/container.serviceAgent" = ["serviceAccount:service-${module.hub_project.project_number}@container-engine-robot.iam.gserviceaccount.com"]
+data "terraform_remote_state" "hub" {
+  backend = "gcs"
+  config = {
+    bucket = "tf_states_bucket"
+    prefix = "hub"
   }
 }
-
-module "hub_vpc" {
-  source      = "../../../modules/net-vpc"
-  project_id  = module.hub_project.project_id
-  name        = "hub-vpc"
-  subnets     = [
-    {
-      name                = "hub-subnet"
-      ip_cidr_range       = "10.0.0.0/24"
-      region              = "europe-west3"
-      // Add any additional required properties here based on module's variables.tf
-    },
+locals {
+  vm-instances = [
+    module.spoke_vm.instance
   ]
-  // Add any additional required variables here based on module's variables.tf
+  vm_startup_script = join("\n", [
+    "#! /bin/bash",
+    "apt-get update && apt-get install -y bash-completion dnsutils kubectl"
+  ])
 }
-
-
-# Spoke Projects
-module "spoke1_project" {
-  source              = "../../../modules/project"
-  prefix = var.prefix
-  name                = "spoke1-project"
-  parent = data.google_folder.my_folder_info.folder
+module "spoke_project" {
+  source              = "../project"
+  prefix              = var.prefix
+  name                = "spoke${var.spoke_number}"
+  parent              = data.terraform_remote_state.hub.outputs.folder_id
   billing_account     = var.billing_account_id
-  services        = concat(var.project_services, ["dns.googleapis.com"])
+  services            = concat(var.project_services, ["dns.googleapis.com", "container.googleapis.com"])
+  
   shared_vpc_host_config = {
     enabled = true
   }
+
   iam = {
     "roles/owner" = var.owners_host
-   "roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.spoke1_project.number}@container-engine-robot.iam.gserviceaccount.com"]
-    #"roles/container.hostServiceAgentUser" = ["serviceAccount:service-${module.service_project1_for_spoke1.number}@cloudservices.gserviceaccount.com"]
+    "roles/iam.serviceAccountUser" = var.owners_host
   }
+}
+
+module "service_project" {
+  source              = "../project"
+  prefix              = var.prefix
+  name                = "svc-spoke${var.spoke_number}"
+  parent              = data.terraform_remote_state.hub.outputs.folder_id
+  billing_account     = var.billing_account_id
+  services            = concat(var.project_services, ["dns.googleapis.com", "container.googleapis.com"])
   
-}
-
-# module "spoke2_project" {
-#   source              = "terraform-google-modules/project-factory/google"
-#   name                = "spoke2-project"
-#   random_project_id   = true
-#   folder_id           = module.new_folder.id
-#   billing_account     = var.billing_account
-#   services        = concat(var.project_services, ["dns.googleapis.com"])
-#   shared_vpc_host_config = {
-#     enabled = true
-#   }
-#   iam = {
-#     "roles/owner" = var.owners_host
-#   }
-# }
-
-# Service Projects for Spoke 1
-module "service_project1_for_spoke1" {
-  source              = "../../../modules/project"
-  prefix = var.prefix
-  name                = "service-project1-spoke1"
-  parent = data.google_folder.my_folder_info.folder
-  billing_account     = var.billing_account_id
-  services        = concat(var.project_services, ["dns.googleapis.com"])
-  // Shared VPC host project ID
   shared_vpc_service_config = {
-    host_project = module.spoke1_project.project_id
+    host_project = module.spoke_project.project_id
     service_identity_iam = {
-      
+      "roles/container.hostServiceAgentUser" = ["container-engine"]
+      "roles/compute.networkUser"            = ["container-engine"]
     }
   }
-}
 
-module "service_project2_for_spoke1" {
-  source              = "../../../modules/project"
-  prefix = var.prefix
-  name                = "service-project2-spoke1"
- parent = data.google_folder.my_folder_info.folder 
-  billing_account     = var.billing_account_id
-  services        = concat(var.project_services, ["dns.googleapis.com"])
-  auto_create_network = false
-  shared_vpc_service_config = {
-    host_project = module.spoke1_project.project_id
-    service_identity_iam = {
-      
+  iam = merge(
+    {
+      "roles/container.developer" = ["serviceAccount:${data.terraform_remote_state.hub.outputs.hub_vm_service_account_email}"]
+      "roles/owner"               = var.owners_gke
+      "roles/container.clusterViewer" = [
+        "serviceAccount:${data.terraform_remote_state.hub.outputs.hub_project_number}-compute@developer.gserviceaccount.com"
+      ]
+    },
+    var.cluster_create
+    ? {
+      "roles/logging.logWriter"       = [module.cluster_nodepool[0].service_account_iam_email]
+      "roles/monitoring.metricWriter" = [module.cluster_nodepool[0].service_account_iam_email]
     }
-  }
+    : {}
+  )
 }
 
-# Service Projects for Spoke 2
-# module "service_project1_for_spoke2" {
-#   source              = "terraform-google-modules/project-factory/google"
-#   name                = "service-project1-spoke2"
-#   random_project_id   = true
-#   org_id              = var.org_id
-#   folder_id           = module.new_folder.id
-#   billing_account     = var.billing_account
-#   auto_create_network = false
-#   activate_apis       = ["compute.googleapis.com"]
-#   shared_vpc_service_config = {
-#     host_project = module.spoke2_project.project_id
-#     service_identity_iam = {
-#       "roles/container.hostServiceAgentUser" = ["container-engine"]
-#       "roles/compute.networkUser"            = ["container-engine"]
-#     }
-#   }
-# }
-
-# module "service_project2_for_spoke2" {
-#   source              = "terraform-google-modules/project-factory/google"
-#   name                = "service-project2-spoke2"
-#   random_project_id   = true
-#   org_id              = var.org_id
-#   folder_id           = module.new_folder.id
-#   billing_account     = var.billing_account
-#   auto_create_network = false
-#   activate_apis       = ["compute.googleapis.com"]
-#   shared_vpc_service_config = {
-#     host_project = module.spoke2_project.project_id
-#     service_identity_iam = {
-#       "roles/container.hostServiceAgentUser" = ["container-engine"]
-#       "roles/compute.networkUser"            = ["container-engine"]
-#     }
-#   }
-# }
-
-
-# Spoke1 vpc
-module "spoke1-shared-vpc" {
-  source     = "../../../modules/net-vpc"
-  project_id = module.spoke1_project.project_id
-  name       = "spoke1-shared-vpc"
-  subnets = [
+module "spoke_vpc" {
+  source     = "../net-vpc"
+  project_id = module.spoke_project.project_id
+  name       = "${var.spoke_name}-shared-vpc"
+  subnets    = [
     {
       ip_cidr_range = var.ip_ranges.gce
       name          = "gce"
       region        = var.region
-      iam = {
+      iam           = {
         "roles/compute.networkUser" = concat(var.owners_gce, [
-          "serviceAccount:${module.service_project1_for_spoke1.service_accounts.cloud_services}",
+          "serviceAccount:${module.service_project.service_accounts.cloud_services}",
+          "serviceAccount:${module.service_project.service_accounts.robots.container-engine}"
         ])
       }
     },
@@ -157,313 +92,95 @@ module "spoke1-shared-vpc" {
       name          = "gke"
       region        = var.region
       secondary_ip_ranges = {
-        pods     = var.ip_secondary_ranges.gke-pods
-        services = var.ip_secondary_ranges.gke-services
+      pods     = var.ip_secondary_ranges.gke_pods
+      services = var.ip_secondary_ranges.gke_services
       }
       iam = {
         "roles/compute.networkUser" = concat(var.owners_gke, [
-          "serviceAccount:${module.service_project1_for_spoke1.service_accounts.cloud_services}",
-          "serviceAccount:${module.service_project1_for_spoke1.service_accounts.robots.container-engine}",
+          "serviceAccount:${module.spoke_project.number}@cloudservices.gserviceaccount.com",
+          "serviceAccount:${module.service_project.service_accounts.cloud_services}",
+          "serviceAccount:${module.service_project.service_accounts.robots.container-engine}",
+          "serviceAccount:service-${module.service_project.number}@container-engine-robot.iam.gserviceaccount.com",
+          "serviceAccount:${module.service_project.number}@cloudservices.gserviceaccount.com",
+          "serviceAccount:service-${module.service_project.number}@compute-system.iam.gserviceaccount.com"
         ])
-        "roles/compute.securityAdmin" = [
-          "serviceAccount:${module.service_project1_for_spoke1.service_accounts.robots.container-engine}",
-        ]
       }
     }
   ]
 }
 
-# #spoke2 vpc
-# module "spoke2-shared-vpc" {
-#   source     = "../../../modules/net-vpc"
-#   project_id = module.spoke2_project.project_id
-#   name       = "shared-vpc"
-#   subnets = [
-#     {
-#       ip_cidr_range = var.ip_ranges.gce
-#       name          = "gce"
-#       region        = var.region
-#       iam = {
-#         "roles/compute.networkUser" = concat(var.owners_gce, [
-#           "serviceAccount:${module.project-svc-gce.service_accounts.cloud_services}",
-#         ])
-#       }
-#     },
-#     {
-#       ip_cidr_range = var.ip_ranges.gke
-#       name          = "gke"
-#       region        = var.region
-#       secondary_ip_ranges = {
-#         pods     = var.ip_secondary_ranges.gke-pods
-#         services = var.ip_secondary_ranges.gke-services
-#       }
-#       iam = {
-#         "roles/compute.networkUser" = concat(var.owners_gke, [
-#           "serviceAccount:${module.service_project1_for_spoke2.service_accounts.cloud_services}",
-#           "serviceAccount:${module.service_project1_for_spoke2.service_accounts.robots.container-engine}",
-#         ])
-#         "roles/compute.securityAdmin" = [
-#           "serviceAccount:${module.service_project1_for_spoke2.service_accounts.robots.container-engine}",
-#         ]
-#       }
-#     }
-#   ]
-# }
-
-
-# Firewall Rules for the Hub Network using net-vpc-firewall module
-module "hub_firewall_rules" {
-  source     = "../../../modules/net-vpc-firewall"
-  project_id = module.hub_project.project_id
-  network    = module.hub_vpc.name
-
-  ingress_rules = {
-    "allow-ssh-rdp-icmp-to-hub" = {
-      description        = "Allow SSH, RDP, and ICMP to hub"
-      priority           = 1000
-      source_ranges      = [var.ip_ranges.gce, var.ip_ranges.gke] # Replace with the actual IP ranges of the spokes
-      rules = [
-        {
-          protocol = "tcp"
-          ports    = ["22", "3389"]
-        },
-        {
-          protocol = "icmp"
-        }
-      ]
-    },
-    "deny-all-ingress-to-hub" = {
-      description        = "Deny all ingress to hub"
-      priority           = 1000
-      source_ranges      = ["0.0.0.0/0"]
-      rules = [
-        {
-          protocol = "tcp"
-        },
-        {
-          protocol = "udp"
-        },
-        {
-          protocol = "icmp"
-        }
-      ]
-    }
-  }
-  // Add any egress rules if you have them, structured similarly
-}
-
-
 module "spoke1_firewall_rules" {
-  source     = "../../../modules/net-vpc-firewall"
-  project_id = module.spoke1_project.project_id
-  network    = module.spoke1-shared-vpc.name
-
-  egress_rules = {
-    "allow-traffic-to-hub" = {
-      description        = "Allow traffic to hub network"
-      priority           = 1000
-      destination_ranges = ["10.0.0.0/24"] # Replace with the IP range of the hub network
-      rules = [
-        {
-          protocol = "tcp"
-          ports    = ["22"]
-        },
-        {
-          protocol = "udp"
-          ports    = ["53"]
-        },
-        {
-          protocol = "icmp"
-        }
-      ]
-    },
-    "block-direct-traffic-between-spokes-egress" = {
-      description        = "Block direct egress traffic between spokes"
-      priority           = 1000
-      destination_ranges = ["10.20.0.0/24"] # Correct the IP range if necessary
-      deny               = true
-      rules = [
-        {
-          protocol = "tcp"
-        },
-        {
-          protocol = "udp"
-        },
-        {
-          protocol = "icmp"
-        }
-      ]
-    }
-  }
-
-  ingress_rules = {
-    "block-direct-traffic-between-spokes-ingress" = {
-      description   = "Block direct ingress traffic between spokes"
-      priority      = 1000
-      source_ranges = ["10.20.0.0/24"] # Correct the IP range if necessary
-      deny          = true
-      rules = [
-        {
-          protocol = "tcp"
-        },
-        {
-          protocol = "udp"
-        },
-        {
-          protocol = "icmp"
-        }
-      ]
-    },
-    "deny-all-other-ingress-spoke" = {
-      description   = "Deny all other ingress to the spoke"
-      priority      = 1000
-      source_ranges = ["0.0.0.0/0"]
-      deny          = true
-      rules = [
-        {
-          protocol = "all"
-        }
-      ]
-    }
+  source     = "../net-vpc-firewall"
+  project_id = module.spoke_project.project_id
+  network    = module.spoke_vpc.name
+ default_rules_config = {
+    admin_ranges = values(var.ip_ranges)
   }
 }
 
 
-# module "spoke2_firewall_rules" {
-#   source      = "terraform-google-modules/network/google//modules/firewall-rules"
-#   project_id  = module.spoke1_project.project_id
-#   network     = "<SPOKE_NETWORK_NAME>"
-
-#   rules = [
-#     {
-#       name               = "allow-traffic-to-hub"
-#       direction          = "EGRESS"
-#       action             = "allow"
-#       destination_ranges = ["<HUB_NETWORK_IP_RANGE>"]  # Replace with the IP range of the hub network
-#       ranges             = ["tcp:<PORT>", "udp:<PORT>", "icmp"]  # Replace <PORT> with actual ports
-#     },
-#     {
-#       name               = "block-direct-traffic-between-spokes"
-#       direction          = "INGRESS"
-#       action             = "deny"
-#       sources            = ["<OTHER_SPOKE_NETWORK_IP_RANGES>"]
-#       ranges             = ["tcp", "udp", "icmp"]
-#     },
-#     {
-#       name               = "block-direct-traffic-between-spokes"
-#       direction          = "EGRESS"
-#       action             = "deny"
-#       destination_ranges = ["<OTHER_SPOKE_NETWORK_IP_RANGES>"]
-#       ranges             = ["tcp", "udp", "icmp"]
-#     },
-#     {
-#       name        = "deny-all-other-ingress-spoke"
-#       direction   = "INGRESS"
-#       action      = "deny"
-#       sources     = ["0.0.0.0/0"]
-#       priority    = 1000
-#     },
-#   ]
-# }
-
-module "hub_to_spoke1_peering" {
-  source  = "../../../modules/net-vpc-peering"
-
-  local_network   = "projects/${module.hub_project.project_id}/global/networks/${module.hub_vpc.name}"
-  peer_network    = "projects/${module.spoke1_project.project_id}/global/networks/${module.spoke1-shared-vpc.name}"  # Replace with the resource link of the Spoke 1 network
-  // Include other optional variables if needed
-}
-
-
-
-
-# module "hub_to_spoke2_peering" {
-#   source  = "terraform-google-modules/network/google//modules/vpc-peering"
-#   version = "~> 3.0"
-
-#   project_id       = module.hub_project.project_id
-#   network          = module.hub_vpc.network_name
-#   peer_project_id  = module.spoke2_project.project_id
-#   peer_network     = "<SPOKE2_NETWORK_NAME>"  # Replace with the Spoke 2 network name
-# }
-
-module "spoke1_private_dns" {
-  source      = "../../../modules/dns"
-  project_id  = module.service_project1_for_spoke1.project_id
-  name        = "spoke1-private-zone"
-  description = "Private DNS zone for Spoke 1"
+module "spoke_private_dns" {
+  source      = "../dns"
+  project_id  = module.spoke_project.project_id
+  name        = "${var.spoke_name}-private-zone"
+  description = "Private DNS zone for ${var.spoke_number}"
   zone_config = {
-    domain = "gke.mcs-paas-dev.gcp.t-systems.net."
-    peering = {
-      client_networks = [module.spoke1-shared-vpc.self_link]
-      peer_network    = module.hub_vpc.self_link
+    domain    = "gke${var.spoke_number}.mcs-paas-dev.gcp.t-systems.net."
+    private   = {
+      client_networks = [module.spoke_vpc.self_link]
     }
   }
-}
-
-
-
-
-# module "spoke1_cloud_nat" {
-#   source      = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/net-cloudnat"
-#   project_id  = module.spoke1_project.project_id
-#   region      = var.region
-#   network     = module.spoke1_shared_vpc.network
-#   router      = "spoke1-nw"  // Specify the existing router name
-#   name        = "spoke1-cloud-nat"
-
-#   nat_ips = {
-#     num_addresses_per_subnet = {
-#       "europe-west3" = 1  // Adjust according to the subnets and their locations
-#     }
-#   }
-# }
-
-module "spoke1_cloud_nat" {
-  source      = "github.com/GoogleCloudPlatform/cloud-foundation-fabric//modules/net-cloudnat"
-  project_id  = module.spoke1_project.project_id
-  region      = var.region
-  name        = "spoke1-cloud-nat"
-  
-  // The 'router_network' variable should be the name of the VPC, not the network self link.
-  router_network = module.spoke1-shared-vpc.name
-
-  // If you are creating a new router for this NAT, set 'router_create' to true.
-  // If you're using an existing router, set 'router_create' to false and provide 'router_name'.
-  router_create = false
-  router_name   = "spoke1-nw"  // The name of the existing router.
-
-  // Define external IP addresses if you have any. Otherwise, this will default to an empty list.
-  addresses = []
-
-  // 'config_source_subnetworks' defines the subnetworks for NAT.
-  // 'all' being true means all subnetworks in the region are NAT-ed.
-  config_source_subnetworks = {
-    all = true
+  recordsets = {
+    "A localhost" = { records = ["127.0.0.1"] }
+    "A bastion"   = { records = [data.terraform_remote_state.hub.outputs.hub_vm_internal_ip] }
   }
-
-  // If you want to enable logging, set 'logging_filter' to one of the allowed values.
-  // Leave it as null if you do not want to enable logging.
-  logging_filter = null
 }
 
-##############################GKE Configuration####################################
-module "cluster-1" {
-  source     = "../../../modules/gke-cluster-standard"
+module "spoke_vm" {
+  source     = "../compute-vm"
+  project_id = module.spoke_project.project_id
+  zone       = "${var.region}-b"
+  name       = "${var.prefix}-${var.spoke_number}"
+  network_interfaces = [{
+    network    = module.spoke_vpc.self_link
+    subnetwork = module.spoke_vpc.subnet_self_links["${var.region}/gke"]
+    nat        = false
+    addresses  = null
+  }]
+  metadata = { startup-script = local.vm_startup_script }
+  service_account = {
+    auto_create = true
+  }
+  tags = ["ssh"]
+}
+
+module "cluster" {
+  source     = "../gke-cluster-standard"
   count      = var.cluster_create ? 1 : 0
   name       = "cluster-1"
-  project_id = module.service_project2_for_spoke1.project_id
+  project_id = module.service_project.project_id
   location   = "${var.region}-b"
   vpc_config = {
-   network    = module.spoke1-shared-vpc.self_link
-    subnetwork = module.spoke1-shared-vpc.subnet_self_links["${var.region}/gke"]
-     master_ipv4_cidr_block = "172.16.0.16/28"
-
+    network    = module.spoke_vpc.self_link
+    subnetwork = module.spoke_vpc.subnet_self_links["${var.region}/gke"]
+    master_ipv4_cidr_block = var.private_service_ranges.cluster_1
+    secondary_range_names = {
+      #pods     = var.ip_secondary_ranges["gke_pods"]
+      #services = var.ip_secondary_ranges["gke_services"]
+    }
+    master_authorized_ranges = {
+      "CorpNet" = "10.0.0.0/24"
+    }
   }
   max_pods_per_node = 32
   private_cluster_config = {
     enable_private_endpoint = true
     master_global_access    = true
+    peering_config = {
+      project_id = module.spoke_project.project_id 
+      export_routes = true
+      import_routes = false
+    }
   }
   labels = {
     environment = "test"
@@ -471,16 +188,124 @@ module "cluster-1" {
   deletion_protection = var.deletion_protection
 }
 
-module "cluster-1-nodepool-1" {
-  source       = "../../../modules/gke-nodepool"
+module "cluster_nodepool" {
+  source       = "../gke-nodepool"
   count        = var.cluster_create ? 1 : 0
-  name         = "nodepool-1"
-  project_id   = module.service_project2_for_spoke1.project_id
-  location     = module.cluster-1.0.location
-  cluster_name = module.cluster-1.0.name
-  cluster_id   = module.cluster-1.0.id
+  name         = "nodepool-${var.spoke_name}"
+  project_id   = module.service_project.project_id
+  location     = module.cluster[0].location
+  cluster_name = module.cluster[0].name
+  cluster_id   = module.cluster[0].id
   service_account = {
     create = true
   }
 }
 
+###vpn - peering####
+
+locals {
+  unique_id = formatdate("YYYYMMDDHHmmss", timestamp())
+}
+
+module "hub_to_spoke_peering" {
+  source        = "../net-vpc-peering"
+  local_network = "projects/${data.terraform_remote_state.hub.outputs.hub_project_id}/global/networks/${data.terraform_remote_state.hub.outputs.hub_network_name}"
+  peer_network  = "projects/${module.spoke_project.project_id}/global/networks/${module.spoke_vpc.name}"
+  routes_config = {
+    local = { export = true, import = false }
+    peer  = { export = false, import = true }
+  }
+}
+
+module "vpn_hub" {
+  source     = "../net-vpn-ha"
+  project_id = data.terraform_remote_state.hub.outputs.hub_project_id
+  region     = var.region
+  network    = data.terraform_remote_state.hub.outputs.hub_network_name
+  name = "${var.prefix}-hub-${local.unique_id}"
+  peer_gateways = {
+    default = { gcp = module.vpn_spoke.self_link }
+  }
+  router_config = {
+    asn = 64516
+    custom_advertise = {
+      all_subnets          = true
+      all_vpc_subnets      = true
+      all_peer_vpc_subnets = true
+      ip_ranges = {
+        "10.0.0.0/8" = "default"
+      }
+    }
+  }
+  tunnels = {
+    remote-0 = {
+      bgp_peer = {
+        address = var.bgp_peer_addresses["hub_remote_0"]
+        #address = "169.254.1.1"
+        asn     = 64515
+      }
+      bgp_session_range     = var.bgp_session_ranges["hub_remote_0"]
+      #bgp_session_range     = "169.254.1.2/30"
+      vpn_gateway_interface = 0
+    }
+    remote-1 = {
+      bgp_peer = {
+        address = var.bgp_peer_addresses["hub_remote_1"]
+        #address = "169.254.2.1"
+        asn     = 64515
+      }
+      bgp_session_range     = var.bgp_session_ranges["hub_remote_1"]
+      #bgp_session_range     = "169.254.2.2/30"
+      vpn_gateway_interface = 1
+    }
+  }
+}
+
+module "vpn_spoke" {
+  source     = "../net-vpn-ha"
+  #project_id = data.terraform_remote_state.spoke.outputs.spoke_project_id
+  project_id = module.spoke_project.project_id
+  region     = var.region
+  #network    = data.terraform_remote_state.spoke.outputs.spoke_network_name
+  network = module.spoke_vpc.name
+  name = "${var.prefix}-spoke-${local.unique_id}"
+  router_config = {
+    asn = 64515
+    custom_advertise = {
+      all_subnets          = true
+      all_vpc_subnets      = true
+      all_peer_vpc_subnets = true
+      ip_ranges = {
+        "10.0.0.0/8"                                  = "default"
+        "${var.private_service_ranges.cluster_1}" = "access to control plane"
+      }
+    }
+  }
+  peer_gateways = {
+    default = { gcp = module.vpn_hub.self_link }
+  }
+  tunnels = {
+    remote-0 = {
+      bgp_peer = {
+        address = var.bgp_peer_addresses["spoke_remote_0"]
+        #address = "169.254.1.2"
+        asn     = 64516
+      }
+      bgp_session_range     = var.bgp_session_ranges["spoke_remote_0"]
+      #bgp_session_range     = "169.254.1.1/30"
+      shared_secret         = module.vpn_hub.random_secret
+      vpn_gateway_interface = 0
+    }
+    remote-1 = {
+      bgp_peer = {
+        address = var.bgp_peer_addresses["spoke_remote_1"]
+        #address = "169.254.2.2"
+        asn     = 64516
+      }
+      bgp_session_range     = var.bgp_session_ranges["spoke_remote_1"]
+      #bgp_session_range     = "169.254.2.1/30"
+      shared_secret         = module.vpn_hub.random_secret
+      vpn_gateway_interface = 1
+    }
+  }
+}
